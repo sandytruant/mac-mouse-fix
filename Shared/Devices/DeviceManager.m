@@ -31,6 +31,7 @@
 #import <IOKit/hidsystem/IOHIDEventSystemClient.h>
 
 #import "Threads.h"
+#import "LogitechButtonDiverter.h"
 
 #import "SharedUtility.h"
 #import "Mac_Mouse_Fix_Helper-Swift.h"
@@ -103,9 +104,18 @@ static NSMutableDictionary<NSNumber *, Device *> *_iohidToAttachedCache;
 + (void)load_Manual {
     setupDeviceMatchingAndRemovalCallbacks();
     _attachedDevices = [NSMutableArray array];
+    // Config is initialized later in AccessibilityCheck; this loop starts afterwards.
+    CFRunLoopPerformBlock(IOThread.runLoop, kCFRunLoopDefaultMode, ^{
+        assertRunLoop(IOThread.runLoop);
+        // On by default; only an explicit `false` turns it off.
+        NSObject *optOut = config(@"General.logitechSideButtons");
+        [LogitechButtonDiverter startWithEnabled:![optOut isKindOfClass:NSNumber.class] || [(NSNumber *)optOut boolValue]];
+    });
 }
 
 + (void)deconfigureDevices {
+    // Worker never waits on IOThread/main, so this bounded wait has no reverse dependency.
+    [LogitechButtonDiverter restoreNativeBehavior];
 
     /// Meant to be called when the app closes
 

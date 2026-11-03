@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C1D0B0001B04000000000001 /* LogitechButtonDiverter.m in Sources */ = {isa = PBXBuildFile; fileRef = C1D0B0001B04000000000003 /* LogitechButtonDiverter.m */; };
 		4F09283F28B8101600BDC2FF /* TrialSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F09283E28B8101600BDC2FF /* TrialSection.swift */; };
 		4F09284028B8101600BDC2FF /* TrialSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F09283E28B8101600BDC2FF /* TrialSection.swift */; };
 		4F09284228B8C71C00BDC2FF /* Hyperlink.m in Sources */ = {isa = PBXBuildFile; fileRef = 4FF665E725F2C92700689B77 /* Hyperlink.m */; };
@@ -614,6 +615,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C1D0B0001B04000000000002 /* LogitechButtonDiverter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LogitechButtonDiverter.h; sourceTree = "<group>"; };
+		C1D0B0001B04000000000003 /* LogitechButtonDiverter.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LogitechButtonDiverter.m; sourceTree = "<group>"; };
+		C1D0B0001B04000000000004 /* LogitechHIDPPState.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LogitechHIDPPState.h; sourceTree = "<group>"; };
 		4F0028012C58303B00CDB9D0 /* LocalizationScreenshotTakerTestPlan.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; name = LocalizationScreenshotTakerTestPlan.xctestplan; path = LocalizationScreenshotTaker/LocalizationScreenshotTakerTestPlan.xctestplan; sourceTree = SOURCE_ROOT; };
 		4F02C71C2899448900ED0AA8 /* OutputCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputCoordinator.swift; sourceTree = "<group>"; };
 		4F02C7202899453200ED0AA8 /* OutputCoordinator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = OutputCoordinator.h; sourceTree = "<group>"; };
@@ -2698,6 +2702,9 @@
 			isa = PBXGroup;
 			children = (
 				4FF6661B25F2C93A00689B77 /* ButtonInputReceiver.h */,
+				C1D0B0001B04000000000002 /* LogitechButtonDiverter.h */,
+				C1D0B0001B04000000000003 /* LogitechButtonDiverter.m */,
+				C1D0B0001B04000000000004 /* LogitechHIDPPState.h */,
 				4FF6661E25F2C93A00689B77 /* ButtonInputReceiver.m */,
 				4FF8C8A22895AACB007EC31F /* Buttons.swift */,
 				4FF8C89928955490007EC31F /* ClickCycle.swift */,
@@ -3762,6 +3769,7 @@
 				4F4C737D2C4FB06E001D97C3 /* NSString+Steganography.m in Sources */,
 				4FFA4E4628B7D2960062A1FE /* Replace.swift in Sources */,
 				4FF6668825F2C93A00689B77 /* ButtonInputReceiver.m in Sources */,
+				C1D0B0001B04000000000001 /* LogitechButtonDiverter.m in Sources */,
 				4FBC83432DAFB28B00354981 /* MFBenchmark.m in Sources */,
 				4FBC83452DAFB28B00354981 /* MFLoop.m in Sources */,
 				4FBC83462DAFB28B00354981 /* PrivateFunctions.m in Sources */,
