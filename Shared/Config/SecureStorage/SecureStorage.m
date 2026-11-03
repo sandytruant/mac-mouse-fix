@@ -53,6 +53,9 @@
 #import "Logging.h"
 #import "Threads.h"
 #import "Constants.h"
+#if MF_LOCAL_SIGNING
+#import "LocalKeychain.h"
+#endif
 
 #if IS_HELPER
     #define secureStorageRunLoop() IOThread.runLoop
@@ -102,6 +105,22 @@
     }
 #undef fail
 
+static OSStatus _callSecItemRead(NSData **data) {
+#if MF_LOCAL_SIGNING
+    SecKeychainRef keychain = NULL;
+    OSStatus status = MFLocalOpen(&keychain);
+    if (!status) status = MFLocalRead(keychain, data);
+    if (keychain) CFRelease(keychain);
+    return status;
+#else
+    NSDictionary *query = @{ baseQuery, (id)kSecReturnData: @YES };
+    CFDataRef dataCF = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge void *)query, (void *)&dataCF);
+    if (dataCF) *data = CFBridgingRelease(dataCF);
+    return status;
+#endif
+}
+
 SecureStorageReadError readSecureStorage(NSString *callerName, NSMutableDictionary **outDict) {
     assertRunLoop(secureStorageRunLoop());
 
@@ -112,13 +131,7 @@ SecureStorageReadError readSecureStorage(NSString *callerName, NSMutableDictiona
     /// Get the data from the keychain
     NSData *data = nil;
     {
-        NSDictionary *query = @{
-            baseQuery,
-            (id)kSecReturnData: @YES
-        };
-        CFDataRef dataCF = NULL;
-        OSStatus status = SecItemCopyMatching((__bridge void *)query, (void *)&dataCF);
-        if (dataCF) data = CFBridgingRelease(dataCF);
+        OSStatus status = _callSecItemRead(&data);
         if (status) fail([NSError errorWithDomain: NSOSStatusErrorDomain code: status userInfo: nil]);
     }
 
@@ -158,14 +171,30 @@ SecureStorageReadError readSecureStorage(NSString *callerName, NSMutableDictiona
 }
 
 static OSStatus _callSecItemUpdate(NSData *data) {
+#if MF_LOCAL_SIGNING
+    SecKeychainRef keychain = NULL;
+    OSStatus status = MFLocalOpen(&keychain);
+    if (!status) status = MFLocalUpdate(keychain, data);
+    if (keychain) CFRelease(keychain);
+    return status;
+#else
     NSDictionary *query = @{ baseQuery };
     NSDictionary *updates = @{ (id)kSecValueData: data };
     return SecItemUpdate((__bridge void *)query, (__bridge void *)updates);
+#endif
 }
 static OSStatus _callSecItemAdd(NSData *data) {
+#if MF_LOCAL_SIGNING
+    SecKeychainRef keychain = NULL;
+    OSStatus status = MFLocalOpen(&keychain);
+    if (!status) status = MFLocalCreateForCurrentApplication(keychain, data);
+    if (keychain) CFRelease(keychain);
+    return status;
+#else
     NSDictionary *attributes = @{ baseQuery,
                                   (id)kSecValueData: data };
     return SecItemAdd((__bridge void *)attributes, /*result*/NULL); /** Note: The docs say not to use SecItemAdd() from mainThread since it blocks the calling thread, but it seems fine so far. */
+#endif
 }
 
 bool writeSecureStorage(NSString *callerName, NSMutableDictionary *dict, SecureStorageReadError readError) { /// Returns success
