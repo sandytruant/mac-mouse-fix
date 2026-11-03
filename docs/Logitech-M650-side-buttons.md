@@ -18,7 +18,7 @@
 - **能力限制**：当前不扩展 `Device.nOfButtons` 或 SwitchMaster 能力掩码。HID 描述已包含按钮 1–5 时没有此限制；若所有已附加设备只声明少于5键，4/5 的映射可能不会被监听，本实验尚不支持该描述布局。不要通过“所有 Logitech 至少五键”绕过；后续应仅发布已成功接管的能力，并处理异步撤销与 held 的顺序。
 - 匹配 Logitech vendor collection，直接蓝牙，以及 PR1995 的已知接收器 PID `C52B/C532/C534/C548/C547` 的槽位1–6。启用后作用于这些接口上所有符合条件的侧键，不只 M650。`C53F` 等未知 USB 布局和 USB 直连暂不探测，不能仅凭产品名称推断槽位协议。
 - **没有进行 M650/Bolt/多接收器实机验证**。IORegistry 中出现接收器不等于协议验证通过。测试不会打开 HID manager、发设备报告、投递鼠标事件或修改配置。
-- Sender ID 仅在直接蓝牙接口明确同时声明 mouse collection 时使用其 registry ID；独立 vendor collection、接收器槽位无法确认鼠标 sender，显式使用0。不按 PID 匹配 DeviceManager。当前按钮路径的 `NO_FILTER` fallback 可处理未知 sender，但不能据此声称具备正确的多鼠标隔离；多个未知 sender 会共用 StrangeDevice 状态。
+- Sender ID：直接蓝牙接口同时声明 mouse collection 时使用其 registry ID。接收器使用同一 USB 设备（VendorID/ProductID/`LocationID` 相同）下唯一声明 mouse collection `(1,2)` 的兄弟接口的 registry ID，与该接收器原生鼠标事件解析到的设备一致（例：C548 vendor 接口 `0x…efe` → 鼠标接口 `0x…f03`），两个同型号接收器也能区分。接收器先出现 HID++ 接口时，后续核验会补解析。找不到或不唯一时显式使用0，回退到 `NO_FILTER` 的 StrangeDevice。同一接收器上的多只鼠标与原生行为一样共用接收器身份。不按 PID 匹配 DeviceManager。
 - 保存原 reporting flags/remap，写入仅设置临时 divert 的 valid 位；remap参数0表示不改变。**启动时发现的临时 diversion 视为自己崩溃残留并接管**，原始状态记为“未 divert”，退出时清除；持久 diversion 位不动。代价：若 Options+ 正在运行并已 divert 侧键，会被抢走，因此建议不要同时运行。运行期间观察到其他客户端修改 flags/remap 后放弃该控制，直到重新连接才重试，避免反复争抢。ACK 与完整 CID/readback 匹配后才开始合成输入；丢 ACK 的写入保留清理责任并尝试回退。
 - 没有硬件原子 ownership/lease：另一程序若写出完全相同的状态无法识别。接收器槽位断连（HID++1 `0x41`，byte 4 bit 6）后丢弃旧 ownership，防止恢复到换入的另一只鼠标。
 - 每30秒核验**每个**接管控制，重试初始睡眠/缺失控制；系统唤醒、接收器连接通知、`0x1D4B` 重连通知会立即核验，并在1秒、3秒后各再核验一次；新出现的接口（如蓝牙重连）同样在1秒、3秒后补核验，覆盖鼠标刚连上还不应答的情况。日志会注明接管发生在 receiver/direct、PID 和槽位。正常保持 diversion 或仅查询超时不会释放长按。确认 diversion 已消失时仅释放该控制；断连/正常退出释放全部 held。无法区分丢失 release 报告和真实长按，不使用超时强行抬起。唤醒鼠标的那次按键发生在重新接管之前，仍是原生点击。

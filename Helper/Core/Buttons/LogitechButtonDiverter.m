@@ -131,6 +131,41 @@ static const uint16_t sideCIDs[] = {0x53, 0x56};
     }
     _draining = NO;
 }
+// Receivers deliver mouse input through a sibling USB interface (same vendor/product/LocationID) with a
+// mouse collection. Native events from the receiver resolve to that IOHIDDevice, so ours should too.
+// 0 (-> StrangeDevice fallback) when missing or ambiguous. Candidates carry "MFRegistryID".
+static uint64_t MFLogiMouseSibling(NSArray<NSDictionary *> *candidates, NSDictionary *vendor) {
+    uint64_t found = 0;
+    if (!vendor[@kIOHIDLocationIDKey]) return 0;
+    for (NSDictionary *c in candidates) {
+        BOOL same = YES;
+        for (NSString *key in @[@kIOHIDVendorIDKey, @kIOHIDProductIDKey, @kIOHIDLocationIDKey]) same &= [c[key] isEqual:vendor[key]];
+        BOOL mouse = NO;
+        for (NSDictionary *pair in c[@kIOHIDDeviceUsagePairsKey])
+            mouse |= [pair[@kIOHIDDeviceUsagePageKey] intValue] == 1 && [pair[@kIOHIDDeviceUsageKey] intValue] == 2;
+        uint64_t rid = [c[@"MFRegistryID"] unsignedLongLongValue];
+        if (!same || !mouse || !rid) continue;
+        if (found && found != rid) return 0;
+        found = rid;
+    }
+    return found;
+}
+static uint64_t receiverSenderID(IOHIDDeviceRef device) {
+    NSArray *keys = @[@kIOHIDVendorIDKey, @kIOHIDProductIDKey, @kIOHIDLocationIDKey, @kIOHIDDeviceUsagePairsKey];
+    NSMutableDictionary *vendor = [NSMutableDictionary dictionary];
+    for (NSString *key in keys) [vendor setValue:(__bridge id)IOHIDDeviceGetProperty(device, (__bridge CFStringRef)key) forKey:key];
+    io_iterator_t it = 0;
+    if (IOServiceGetMatchingServices(MACH_PORT_NULL, IOServiceMatching(kIOHIDDeviceKey), &it) != KERN_SUCCESS) return 0;
+    NSMutableArray *candidates = [NSMutableArray array];
+    for (io_service_t s; (s = IOIteratorNext(it)); IOObjectRelease(s)) {
+        NSMutableDictionary *c = [NSMutableDictionary dictionary]; uint64_t rid = 0;
+        for (NSString *key in keys) [c setValue:(__bridge_transfer id)IORegistryEntryCreateCFProperty(s, (__bridge CFStringRef)key, NULL, 0) forKey:key];
+        if (IORegistryEntryGetRegistryEntryID(s, &rid) == KERN_SUCCESS) c[@"MFRegistryID"] = @(rid);
+        [candidates addObject:c];
+    }
+    IOObjectRelease(it);
+    return MFLogiMouseSibling(candidates, vendor);
+}
 static void matched(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
     if (result) return;
     LogitechButtonDiverter *s = (__bridge id)context;
@@ -203,9 +238,10 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     i.open = YES; [_interfaces addObject:i];
     IOHIDDeviceRegisterInputReportCallback(device, i->buffer, sizeof(i->buffer), input, (__bridge void *)i);
     IOHIDDeviceScheduleWithRunLoop(device, _loop, kCFRunLoopDefaultMode);
+    uint64_t receiverSender = i.receiver ? receiverSenderID(device) : 0;
     for (int slot = 1; slot <= (i.receiver ? 6 : 1); slot++) {
-        MFLogiTarget *t = [MFLogiTarget new]; t.index = i.receiver ? slot : 0xFF;
-        // A vendor interface/receiver PID is NOT proof of the mouse event sender.
+        MFLogiTarget *t = [MFLogiTarget new]; t.index = i.receiver ? slot : 0xFF; t.senderID = receiverSender;
+        // A receiver PID alone is NOT proof of the sender (see MFLogiMouseSibling for receivers).
         // Direct combined mouse collections alone have a known registry identity.
         NSArray *pairs = (__bridge NSArray *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDDeviceUsagePairsKey));
         if (!i.receiver) for (NSDictionary *pair in pairs) {
@@ -301,6 +337,11 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
 }
 - (void)verifyAll {
     if (_shutdown) return;
+    for (MFLogiInterface *i in [_interfaces copy]) if (i.receiver && !i.targets.firstObject.senderID) {
+        // The receiver's mouse interface may have appeared after its HID++ interface.
+        uint64_t sender = receiverSenderID(i.device);
+        for (MFLogiTarget *t in i.targets) t.senderID = sender;
+    }
     for (MFLogiInterface *i in [_interfaces copy]) for (MFLogiTarget *t in i.targets) {
         // Re-resolve after wake/reconnect; feature indexes need not survive a firmware reset.
         uint8_t feature = [self feature:0x1B04 target:t on:i];

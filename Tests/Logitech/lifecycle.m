@@ -76,6 +76,19 @@ int main(void) { @autoreleasepool {
     d.asleep=NO;[d verifyAll];assert(t.confirmed.count==2);
     [d snapshot:3 target:t];[d releaseHeld:t mask:3];assert(!t.held && d.edges.count==4);
     d.shutdown=YES;writes=d.writes;[d verifyAll];[d activate:t on:i];assert(d.writes==writes);
+    // Receiver sender: sibling mouse interface of the same USB device (values from a real C548 + C53F setup).
+    NSDictionary *(^hid)(int, int, int, NSArray *) = ^(int pid, int loc, int rid, NSArray *pairs) {
+        NSMutableArray *p=[NSMutableArray array];
+        for (NSArray *u in pairs) [p addObject:@{@kIOHIDDeviceUsagePageKey:u[0], @kIOHIDDeviceUsageKey:u[1]}];
+        return @{@kIOHIDVendorIDKey:@0x46D, @kIOHIDProductIDKey:@(pid), @kIOHIDLocationIDKey:@(loc), @kIOHIDDeviceUsagePairsKey:p, @"MFRegistryID":@(rid)};
+    };
+    NSDictionary *bolt=hid(0xC548,18087936,0xefe,@[@[@0xFF00,@1],@[@0xFF00,@2]]);
+    NSMutableArray *all=[@[bolt, hid(0xC548,18087936,0xf07,@[@[@1,@6]]),
+        hid(0xC548,18087936,0xf03,@[@[@1,@2],@[@1,@1],@[@12,@1]]), hid(0xC548,18087936,0xef9,@[@[@13,@5]]),
+        hid(0xC53F,18022400,0x1684,@[@[@1,@2]]), hid(0xC548,99,0x999,@[@[@1,@2]])] mutableCopy];
+    assert(MFLogiMouseSibling(all,bolt)==0xf03);
+    assert(!MFLogiMouseSibling(all,@{@kIOHIDVendorIDKey:@0x46D,@kIOHIDProductIDKey:@0xC548}));      // no LocationID
+    [all addObject:hid(0xC548,18087936,0xf10,@[@[@1,@2]])];assert(!MFLogiMouseSibling(all,bolt)); // ambiguous
     LogitechButtonDiverter *real=[LogitechButtonDiverter new];t.senderID=1234;
     [real post:0x53 down:YES target:t];
     assert(CGEventGetIntegerValueField(captured,kCGMouseEventButtonNumber)==3);
@@ -97,5 +110,5 @@ int main(void) { @autoreleasepool {
     writes=d.writes;[LogitechButtonDiverter restoreNativeBehavior];assert(d.writes==writes);
     // Shutdown before deferred startup must not start new hardware work.
     [LogitechButtonDiverter startWithEnabled:YES];assert(shared==d);
-    puts("PASS lifecycle: ownership, remap preservation, lost ACK rollback, both-control verification, long hold/timeouts, retry, foreign diversion, crash-leftover takeover, cleanup, pressure/sender/timestamp");
+    puts("PASS lifecycle: ownership, remap preservation, lost ACK rollback, both-control verification, long hold/timeouts, retry, foreign diversion, crash-leftover takeover, receiver sender mapping, cleanup, pressure/sender/timestamp");
 } }
