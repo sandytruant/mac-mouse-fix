@@ -241,7 +241,9 @@ static CFDataRef _Nullable didReceiveMessage(CFMessagePortRef port, SInt32 messa
         
         if ((0)) ;
         xxx(@"configFileChanged") {
-            [Config loadFileAndUpdateStates];
+            /// Without accessibility access `[Config load_Manual]` never runs (See AccessibilityCheck.m), so `Config.shared` is nil and reloading would crash. The Helper restarts and loads the config once access is granted. [Nov 2026]
+            if (Config.shared != nil) [Config loadFileAndUpdateStates];
+            else DDLogInfo("Ignoring configFileChanged – Config isn't loaded yet (waiting for accessibility access)");
         }
         xxx(@"terminate") {
             mfrun(CFRunLoopGetMain(), ^{

@@ -21,7 +21,7 @@
 - Sender ID 仅在直接蓝牙接口明确同时声明 mouse collection 时使用其 registry ID；独立 vendor collection、接收器槽位无法确认鼠标 sender，显式使用0。不按 PID 匹配 DeviceManager。当前按钮路径的 `NO_FILTER` fallback 可处理未知 sender，但不能据此声称具备正确的多鼠标隔离；多个未知 sender 会共用 StrangeDevice 状态。
 - 保存原 reporting flags/remap，写入仅设置临时 divert 的 valid 位；remap参数0表示不改变。**启动时发现的临时 diversion 视为自己崩溃残留并接管**，原始状态记为“未 divert”，退出时清除；持久 diversion 位不动。代价：若 Options+ 正在运行并已 divert 侧键，会被抢走，因此建议不要同时运行。运行期间观察到其他客户端修改 flags/remap 后放弃该控制，直到重新连接才重试，避免反复争抢。ACK 与完整 CID/readback 匹配后才开始合成输入；丢 ACK 的写入保留清理责任并尝试回退。
 - 没有硬件原子 ownership/lease：另一程序若写出完全相同的状态无法识别。接收器槽位断连（HID++1 `0x41`，byte 4 bit 6）后丢弃旧 ownership，防止恢复到换入的另一只鼠标。
-- 每30秒核验**每个**接管控制，重试初始睡眠/缺失控制；系统唤醒、接收器连接通知、`0x1D4B` 重连通知会立即核验，并在1秒后再核验一次，覆盖鼠标刚连上还不应答的情况。正常保持 diversion 或仅查询超时不会释放长按。确认 diversion 已消失时仅释放该控制；断连/正常退出释放全部 held。无法区分丢失 release 报告和真实长按，不使用超时强行抬起。唤醒鼠标的那次按键发生在重新接管之前，仍是原生点击。
+- 每30秒核验**每个**接管控制，重试初始睡眠/缺失控制；系统唤醒、接收器连接通知、`0x1D4B` 重连通知会立即核验，并在1秒、3秒后各再核验一次；新出现的接口（如蓝牙重连）同样在1秒、3秒后补核验，覆盖鼠标刚连上还不应答的情况。日志会注明接管发生在 receiver/direct、PID 和槽位。正常保持 diversion 或仅查询超时不会释放长按。确认 diversion 已消失时仅释放该控制；断连/正常退出释放全部 held。无法区分丢失 release 报告和真实长按，不使用超时强行抬起。唤醒鼠标的那次按键发生在重新接管之前，仍是原生点击。
 - 所有命令和清理串行运行在独立 IOHIDLib worker；请求等待仅泵该线程 run loop。worker 不读取 Config/DeviceManager，也不等待 main/IOThread。SIGTERM/SIGINT 经 dispatch signal source 在普通上下文清理，**不是 signal-safe ObjC 调用**。正常退出最多等4秒，先释放全部 held，再逐控制恢复；多设备/离线超时可能无法在退出前完成硬件恢复，下次启动会接管并清理。
 - 合成事件保持原输入路径，整数 pressure 为 down=1/up=0，时间戳使用 `CLOCK_UPTIME_RAW` 纳秒而非 `mach_absolute_time()` 原始 ticks。
 

@@ -33,6 +33,7 @@
 @property IOHIDDeviceRef device;
 @property BOOL open, receiver, waiting, answered, removed;
 @property uint8_t pendingIndex, pendingFeature, command, software;
+@property uint16_t pid;
 @property size_t replyLength;
 @property NSMutableArray<MFLogiTarget *> *targets;
 @end
@@ -112,7 +113,10 @@ static const uint16_t sideCIDs[] = {0x53, 0x56};
 // A freshly (re)connected mouse may not answer yet. Retry shortly instead of waiting for the 30 s timer.
 - (void)reverifySoon {
     [self enqueue:^{ [self verifyAll]; }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    [self verifyAfter:1]; [self verifyAfter:3];
+}
+- (void)verifyAfter:(double)seconds {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self enqueue:^{ [self verifyAll]; }];
     });
 }
@@ -169,6 +173,7 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     for (MFLogiTarget *t in i.targets) if (t.index == r[1]) {
         if (i.receiver && r[2] == 0x41) {
             if (MFHIDPPReceiverLinkDown(r, n)) [shared enqueue:^{
+                NSLog(@"Logitech receiver %04x slot %d disconnected", i.pid, t.index);
                 [shared releaseHeld:t mask:3];
                 // Slots can be reused. Never restore stale ownership onto a new mouse.
                 [t.original removeAllObjects]; [t.confirmed removeAllObjects]; [t.foreign removeAllObjects];
@@ -188,11 +193,13 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     for (MFLogiInterface *i in _interfaces) if (i.device == device) return;
     MFLogiInterface *i = [MFLogiInterface new]; i.device = (IOHIDDeviceRef)CFRetain(device);
     uint16_t pid = [(__bridge NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey)) unsignedShortValue];
+    i.pid = pid;
     i.receiver = pid == 0xC52B || pid == 0xC532 || pid == 0xC534 || pid == 0xC548 || pid == 0xC547;
     NSString *transport = (__bridge NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDTransportKey));
     // Unknown USB receiver layouts (including C53F) are not treated as direct mice.
     if (!i.receiver && ![transport hasPrefix:@"Bluetooth"]) return;
-    if (IOHIDDeviceOpen(device, kIOHIDOptionsTypeNone)) return;
+    IOReturn opened = IOHIDDeviceOpen(device, kIOHIDOptionsTypeNone);
+    if (opened) { NSLog(@"Logitech HID++ interface %04x (%@) open failed: %x", pid, transport, opened); return; }
     i.open = YES; [_interfaces addObject:i];
     IOHIDDeviceRegisterInputReportCallback(device, i->buffer, sizeof(i->buffer), input, (__bridge void *)i);
     IOHIDDeviceScheduleWithRunLoop(device, _loop, kCFRunLoopDefaultMode);
@@ -209,6 +216,8 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
         }
         [i.targets addObject:t]; [self activate:t on:i];
     }
+    // Reconnects (e.g. Bluetooth wake) re-add the interface before the mouse answers HID++.
+    [self verifyAfter:1]; [self verifyAfter:3];
 }
 - (void)close:(MFLogiInterface *)i {
     if (!i.open) return;
@@ -273,7 +282,8 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
         // Record cleanup responsibility before the write, including lost-ACK cases.
         t.original[cid] = [NSData dataWithBytes:original length:3];
         if ([self setDivert:YES cid:cid target:t on:i]) {
-            [t.confirmed addObject:cid]; NSLog(@"Logitech acquired side CID %04x", c);
+            [t.confirmed addObject:cid];
+            NSLog(@"Logitech acquired side CID %04x on %@ %04x index %02x", c, i.receiver ? @"receiver" : @"direct", i.pid, t.index);
         } else [self restore:cid target:t on:i];
     }
 }
