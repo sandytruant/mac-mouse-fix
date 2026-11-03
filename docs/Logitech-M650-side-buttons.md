@@ -6,7 +6,7 @@
 
 1. 默认开启，无需配置。建议退出 Options+、Solaar 等会争用侧键的程序。
 2. 在按钮页面给 4/5 绑定动作（如“点按+拖移”）即可使用。
-3. 如需关闭：退出 helper 后，在 `~/Library/Application Support/com.nuebling.mac-mouse-fix/config.plist` 的 `General` 字典内加入下列内容，再重启 helper：
+3. 如需关闭：退出 helper 后，在 `~/Library/Application Support/com.andysun.mac-mouse-fix.dev/config.plist` 的 `General` 字典内加入下列内容，再重启 helper：
    ```xml
    <key>logitechSideButtons</key><false/>
    ```

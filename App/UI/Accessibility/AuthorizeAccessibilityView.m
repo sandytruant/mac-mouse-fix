@@ -62,6 +62,13 @@ AuthorizeAccessibilityView *_accViewController;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+
+    // AppKit presents this controller in a separate sheet window. Set the root
+    // view's metrics before presentation, just like LicenseSheetController.
+    // Otherwise AppDelegate's window-visible assertion aborts Debug builds.
+    if (@available(macOS 26.0, *)) {
+        self.view.prefersCompactControlSizeMetrics = YES;
+    }
     
     if (@available(macOS 13.0, *)) { } else {
         self.openSettingsLink.stringValue = MFLocalizedString(

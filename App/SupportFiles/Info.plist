@@ -26,7 +26,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.nuebling.mac-mouse-fix</string>
+			<string>com.andysun.mac-mouse-fix.dev</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>macmousefix</string>
@@ -34,7 +34,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>25414</string>
+	<string>25415</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>NSHumanReadableCopyright</key>

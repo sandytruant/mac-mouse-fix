@@ -547,7 +547,7 @@ final class LocalizationScreenshotClass: XCTestCase {
             /// Sidenote:
             ///     [Aug 2025] I tried to define `CapturedButtonsGuideMMF3_ScreenshotRemaps` as Swift by converting the plist to Swift source code via plutil, but plutil converted empty dict to empty array which made MMF crash.
         
-            let configURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appending(path: "/com.nuebling.mac-mouse-fix/config.plist")
+            let configURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appending(path: "/com.andysun.mac-mouse-fix.dev/config.plist")
             let remapsOverrideURL = URL(fileURLWithPath: currentFilePath().deletingLastPathComponent + "/CapturedButtonsGuideMMF3_ScreenshotRemaps.plist")
 
             let remaps = NSDictionary(contentsOf: remapsOverrideURL)!                                      /// Read
@@ -792,7 +792,7 @@ final class LocalizationScreenshotClass: XCTestCase {
         else {
         
             if (url == sharedf_helper_url()) {
-                sharedf_clt("launchctl remove com.nuebling.mac-mouse-fix.helper") /// Prevent launchd from restarting the helper
+                sharedf_clt("launchctl remove com.andysun.mac-mouse-fix.dev.helper") /// Prevent launchd from restarting the helper
             }
         
             let xcapp = XCUIApplication(url: url)

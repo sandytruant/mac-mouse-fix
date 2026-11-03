@@ -63,7 +63,7 @@
 #define baseQuery \
     (id)kSecAttrSynchronizable: @YES, \
     (id)kSecClass: (id)kSecClassGenericPassword, \
-    (id)kSecAttrLabel: @"com.nuebling.mac-mouse-fix.secure-storage" /** "MFSecureStorage" */
+    (id)kSecAttrLabel: @"com.andysun.mac-mouse-fix.dev.secure-storage" /** "MFSecureStorage" */
 
 
 @implementation NSError (Additions)
