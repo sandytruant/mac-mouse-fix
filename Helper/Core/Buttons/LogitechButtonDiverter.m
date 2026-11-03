@@ -2,7 +2,7 @@
 // Licensed under the MMF License (https://github.com/noah-nuebling/mac-mouse-fix/blob/master/License)
 // IOHIDLib worker, serial run-loop request transport and discovery adapted from
 // lcandy2, PR #1995 (a874b40130ba0ab9bbea9e3eab57b5fa5de12f34).
-// Framing/readback/ownership approach informed by PR #2094. Only Back/Forward.
+// Framing approach informed by PR #2094. Only Back/Forward.
 #import "LogitechButtonDiverter.h"
 #import "LogitechHIDPPState.h"
 #import "Constants.h"
@@ -14,18 +14,10 @@
 @interface MFLogiTarget : NSObject
 @property uint8_t index, feature, wireless, held;
 @property uint64_t senderID;
-@property NSMutableDictionary<NSNumber *, NSData *> *original;
-@property NSMutableSet<NSNumber *> *confirmed;
-@property NSMutableSet<NSNumber *> *foreign;
+@property NSMutableSet<NSNumber *> *diverted;
 @end
 @implementation MFLogiTarget
-- (instancetype)init {
-    if ((self = [super init])) {
-        _original = [NSMutableDictionary dictionary];
-        _confirmed = [NSMutableSet set]; _foreign = [NSMutableSet set];
-    }
-    return self;
-}
+- (instancetype)init { if ((self = [super init])) _diverted = [NSMutableSet set]; return self; }
 @end
 @interface MFLogiInterface : NSObject {
 @public uint8_t buffer[64]; uint8_t reply[20];
@@ -88,7 +80,7 @@ static const uint16_t sideCIDs[] = {0x53, 0x56};
     if (NSThread.currentThread != s.thread) {
         NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:4];
         while (!finished && [done waitUntilDate:deadline]) {}
-        if (!finished) NSLog(@"Logitech cleanup timed out; power-cycle mouse if needed");
+        if (!finished) NSLog(@"Logitech cleanup timed out; the next launch takes the buttons over again");
     }
     [done unlock];
 }
@@ -210,9 +202,7 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
             if (MFHIDPPReceiverLinkDown(r, n)) [shared enqueue:^{
                 NSLog(@"Logitech receiver %04x slot %d disconnected", i.pid, t.index);
                 [shared releaseHeld:t mask:3];
-                // Slots can be reused. Never restore stale ownership onto a new mouse.
-                [t.original removeAllObjects]; [t.confirmed removeAllObjects]; [t.foreign removeAllObjects];
-                t.feature = 0; t.wireless = 0;
+                [t.diverted removeAllObjects]; t.feature = 0; t.wireless = 0;
             }];
             else [shared reverifySoon];
         } else if (t.wireless && r[2] == t.wireless && !r[3]) {
@@ -280,20 +270,16 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     uint8_t p[] = {fid >> 8, fid & 255};
     return [self request:i target:t feature:0 function:0 params:p length:2] && i.replyLength >= 7 ? i->reply[4] : 0;
 }
-- (NSData *)reporting:(NSNumber *)cid target:(MFLogiTarget *)t on:(MFLogiInterface *)i {
-    uint16_t c = cid.unsignedShortValue; uint8_t p[] = {c >> 8, c & 255};
-    if (![self request:i target:t feature:t.feature function:2 params:p length:2] || !MFHIDPPReporting(i->reply, i.replyLength, c)) return nil;
-    return [NSData dataWithBytes:i->reply+6 length:3];
+// getCidReporting flags byte, or -1 if the mouse didn't answer.
+- (int)reporting:(uint16_t)c target:(MFLogiTarget *)t on:(MFLogiInterface *)i {
+    uint8_t p[] = {c >> 8, c & 255};
+    if (![self request:i target:t feature:t.feature function:2 params:p length:2] || !MFHIDPPReporting(i->reply, i.replyLength, c)) return -1;
+    return i->reply[6];
 }
-- (BOOL)setDivert:(BOOL)divert cid:(NSNumber *)cid target:(MFLogiTarget *)t on:(MFLogiInterface *)i {
-    uint16_t c = cid.unsignedShortValue;
-    // remap=0 means unchanged; only temporary-diversion valid bit is set.
+- (BOOL)setDivert:(BOOL)divert cid:(uint16_t)c target:(MFLogiTarget *)t on:(MFLogiInterface *)i {
+    // Temporary divert + its valid bit only; remap=0 means unchanged, persistent diversion is untouched.
     uint8_t p[] = {c >> 8, c & 255, divert ? 3 : 2, 0, 0};
-    BOOL ack = [self request:i target:t feature:t.feature function:3 params:p length:5] &&
-        MFHIDPPReporting(i->reply, i.replyLength, c);
-    NSData *now = [self reporting:cid target:t on:i];
-    NSData *before = t.original[cid];
-    return ack && before && now && MFHIDPPOwnership(before.bytes, now.bytes) == (divert ? 1 : 0);
+    return [self request:i target:t feature:t.feature function:3 params:p length:5] && MFHIDPPReporting(i->reply, i.replyLength, c);
 }
 - (void)activate:(MFLogiTarget *)t on:(MFLogiInterface *)i {
     if (_shutdown || !i.open || i.removed) return;
@@ -307,33 +293,14 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     for (int k = 0; k < count && !_shutdown; k++) {
         uint8_t p = k;
         if (![self request:i target:t feature:t.feature function:1 params:&p length:1] || i.replyLength < 9) continue;
-        uint16_t c = i->reply[4] << 8 | i->reply[5]; NSNumber *cid = @(c);
-        if (!MFHIDPPButtonBit(c) || !(i->reply[8] & 0x20) || t.original[cid] || [t.foreign containsObject:cid]) continue;
-        NSData *now = [self reporting:cid target:t on:i];
-        if (!now) continue;
-        // A temporary diversion seen here is almost always our own leftover from a crash/SIGKILL; leaving it
-        // would keep the button dead until a power cycle. Take it over and treat "not diverted" as original.
-        // Persistent diversion (0x04) is untouched: our temporary bit overrides it and restore keeps it.
-        uint8_t original[3]; memcpy(original, now.bytes, 3); original[0] &= ~1;
-        // Record cleanup responsibility before the write, including lost-ACK cases.
-        t.original[cid] = [NSData dataWithBytes:original length:3];
-        if ([self setDivert:YES cid:cid target:t on:i]) {
-            [t.confirmed addObject:cid];
+        uint16_t c = i->reply[4] << 8 | i->reply[5];
+        if (!MFHIDPPButtonBit(c) || !(i->reply[8] & 0x20) || [t.diverted containsObject:@(c)]) continue;
+        // Also takes over a temporary diversion left behind by a crash/SIGKILL.
+        if ([self setDivert:YES cid:c target:t on:i]) {
+            [t.diverted addObject:@(c)];
             NSLog(@"Logitech acquired side CID %04x on %@ %04x index %02x", c, i.receiver ? @"receiver" : @"direct", i.pid, t.index);
-        } else [self restore:cid target:t on:i];
+        }
     }
-}
-- (void)forget:(NSNumber *)cid target:(MFLogiTarget *)t {
-    [self releaseHeld:t mask:MFHIDPPButtonBit(cid.unsignedShortValue)];
-    [t.confirmed removeObject:cid]; [t.original removeObjectForKey:cid];
-}
-- (BOOL)restore:(NSNumber *)cid target:(MFLogiTarget *)t on:(MFLogiInterface *)i {
-    NSData *before = t.original[cid], *now = [self reporting:cid target:t on:i];
-    if (!before || !now) return NO;
-    int state = MFHIDPPOwnership(before.bytes, now.bytes);
-    if (state == 2) [t.foreign addObject:cid];
-    else if (state == 1 && ![self setDivert:NO cid:cid target:t on:i]) return NO;
-    [self forget:cid target:t]; return YES;
 }
 - (void)verifyAll {
     if (_shutdown) return;
@@ -345,21 +312,16 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     for (MFLogiInterface *i in [_interfaces copy]) for (MFLogiTarget *t in i.targets) {
         // Re-resolve after wake/reconnect; feature indexes need not survive a firmware reset.
         uint8_t feature = [self feature:0x1B04 target:t on:i];
-        if (!feature) continue; // Sleeping/unsupported is not a button-up notification.
+        if (!feature) continue; // Asleep is not a button-up; keep long holds.
         t.feature = feature;
         t.wireless = [self feature:0x1D4B target:t on:i];
-        for (NSNumber *cid in t.original.allKeys) {
-            NSData *now = [self reporting:cid target:t on:i];
-            if (!now) continue; // Unreachable is NOT evidence of release; preserve long holds.
-            int state = MFHIDPPOwnership(t.original[cid].bytes, now.bytes);
-            if (state == 2) { [t.foreign addObject:cid]; [self forget:cid target:t]; }
-            else if (state == 0) {
-                [self releaseHeld:t mask:MFHIDPPButtonBit(cid.unsignedShortValue)];
-                [t.confirmed removeObject:cid];
-                if ([self setDivert:YES cid:cid target:t on:i]) [t.confirmed addObject:cid];
-            } else if (![t.confirmed containsObject:cid]) [self restore:cid target:t on:i];
+        for (NSNumber *cid in t.diverted.allObjects) {
+            int flags = [self reporting:cid.unsignedShortValue target:t on:i];
+            if (flags < 0 || (flags & 1)) continue;
+            // The mouse forgot the diversion (reconnect/firmware reset): its button is native again.
+            [self releaseHeld:t mask:MFHIDPPButtonBit(cid.unsignedShortValue)];
+            [t.diverted removeObject:cid];
         }
-        // Retry absent/asleep devices and missing controls, without resetting held state.
         [self activate:t on:i];
     }
 }
@@ -369,8 +331,8 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     // Release ALL held buttons before any potentially slow hardware cleanup.
     for (MFLogiInterface *i in _interfaces) for (MFLogiTarget *t in i.targets) [self releaseHeld:t mask:3];
     for (MFLogiInterface *i in _interfaces) {
-        for (MFLogiTarget *t in i.targets) for (NSNumber *cid in t.original.allKeys)
-            if (![self restore:cid target:t on:i]) NSLog(@"Logitech restoration unconfirmed CID %@; power-cycle mouse", cid);
+        for (MFLogiTarget *t in i.targets) for (NSNumber *cid in t.diverted)
+            if (![self setDivert:NO cid:cid.unsignedShortValue target:t on:i]) NSLog(@"Logitech restore of CID %@ unconfirmed; the next launch takes it over again", cid);
         [self close:i];
     }
     [_interfaces removeAllObjects];
@@ -393,7 +355,7 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
 }
 - (void)snapshot:(uint8_t)mask target:(MFLogiTarget *)t {
     uint8_t owned = 0, held = t.held;
-    for (NSNumber *cid in t.confirmed) owned |= MFHIDPPButtonBit(cid.unsignedShortValue);
+    for (NSNumber *cid in t.diverted) owned |= MFHIDPPButtonBit(cid.unsignedShortValue);
     MFHIDPPEdges e = MFHIDPPTransition(&held, mask, owned); t.held = held;
     for (int k = 0; k < 2; k++) if (e.up & (1 << k)) [self post:sideCIDs[k] down:NO target:t];
     for (int k = 0; k < 2; k++) if (e.down & (1 << k)) [self post:sideCIDs[k] down:YES target:t];

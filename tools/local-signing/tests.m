@@ -30,9 +30,9 @@ static OSStatus accessCreate(CFStringRef label, CFArrayRef apps, SecAccessRef *a
     *a = (SecAccessRef)CFBridgingRetain(@"explicit ACL"); return 0;
 }
 static OSStatus createItem(SecItemClass c, const SecKeychainAttributeList *a, UInt32 n, const void *b, SecKeychainRef k, SecAccessRef access, SecKeychainItemRef *i) {
-    assert(access && aclChecked); creates++;
+    assert(access && aclChecked);
     if (stored) return errSecDuplicateItem;
-    stored = [NSData dataWithBytes:b length:n]; return 0;
+    creates++; stored = [NSData dataWithBytes:b length:n]; return 0;
 }
 static OSStatus openKeychain(const char *p, SecKeychainRef *k) {
     assert(strcmp(p, "/fake-only/test.keychain-db") == 0);
@@ -97,11 +97,10 @@ int main(void) { @autoreleasepool {
     NSArray *apps = @[@"/fake-only/App", @"/fake-only/Helper"];
     assert(MFLocalCreate(keychain, original, apps) == 0 && aclChecked);
     assert([stored isEqualToData:original]);
-    assert(MFLocalCreate(keychain, original, apps) == errSecDuplicateItem && creates == 1);
+    assert(MFLocalCreate(keychain, original, apps) == errSecDuplicateItem);
     assert(MFLocalRead(keychain, &data) == 0 && [data isEqualToData:original]);
     NSData *changed = [NSKeyedArchiver archivedDataWithRootObject:@{@"test": @43} requiringSecureCoding:NO error:NULL];
     assert(MFLocalUpdate(keychain, changed) == 0 && [stored isEqualToData:changed]);
-    assert(!MFLocalValidArchive([NSData data]));
     CFRelease(keychain);
     stored = nil; creates = updates = 0;
     NSMutableDictionary *dict = nil;

@@ -54,26 +54,24 @@ static void change(Fake *d, NSNumber *cid, uint8_t flags) {
 }
 int main(void) { @autoreleasepool {
     MFLogiInterface *i; Fake *d=[Fake new];MFLogiTarget *t=setup(d,&i);
-    [d activate:t on:i];assert(t.confirmed.count==2 && t.original.count==2 && d.writes==2 && !d.states[@0xC3]);
+    #define FLAGS(cid) (((const uint8_t *)d.states[cid].bytes)[0])
+    [d activate:t on:i];assert(t.diverted.count==2 && d.writes==2 && !d.states[@0xC3]);
     [d snapshot:3 target:t];assert(t.held==3 && d.edges.count==2);
     for(int k=0;k<3;k++) [d verifyAll];assert(t.held==3 && d.edges.count==2 && d.writes==2);
-    d.asleep=YES;[d verifyAll];assert(t.held==3 && d.edges.count==2);
-    d.asleep=NO;change(d,@0x56,0x10);[d verifyAll];
-    assert(t.held==1 && t.confirmed.count==2 && d.edges.count==3 && d.writes==3); // second control only
-    [d snapshot:3 target:t];assert(t.held==3);
-    change(d,@0x53,0x21);[d verifyAll];assert(t.held==2 && ![t.confirmed containsObject:@0x53]);
-    int writes=d.writes;[d restoreAll];assert(!i.open && t.held==0 && d.writes==writes+1);
-    [d restoreAll];assert(d.writes==writes+1);
-    // Leftover temporary diversion (crash/SIGKILL) is taken over and cleared on exit; persistent bit is kept.
+    d.asleep=YES;[d verifyAll];assert(t.held==3 && d.edges.count==2); // asleep is not a release
+    d.asleep=NO;change(d,@0x56,0x10);[d verifyAll];                    // mouse forgot one diversion
+    assert(t.held==1 && t.diverted.count==2 && d.edges.count==3 && d.writes==3 && (FLAGS(@0x56)&1));
+    int writes=d.writes;[d restoreAll];assert(!i.open && t.held==0 && d.writes==writes+2 && !(FLAGS(@0x53)&1));
+    [d restoreAll];assert(d.writes==writes+2);
+    // Leftover temporary diversion (crash/SIGKILL) is taken over and cleared on exit; other bits are kept.
     d=[Fake new];t=setup(d,&i);change(d,@0x53,0x11);change(d,@0x56,0x15);[d activate:t on:i];
-    assert(t.confirmed.count==2 && ((const uint8_t *)t.original[@0x53].bytes)[0]==0x10);[d restoreAll];
-    assert(((const uint8_t *)d.states[@0x53].bytes)[0]==0x10 && ((const uint8_t *)d.states[@0x56].bytes)[0]==0x14);
-    d=[Fake new];t=setup(d,&i);d.lostAck=YES;[d activate:t on:i];
-    assert(!t.original.count && !t.confirmed.count && d.writes==4); // accepted writes rolled back
-    d=[Fake new];t=setup(d,&i);d.shortReply=YES;[d activate:t on:i];assert(!d.writes);
-    d=[Fake new];t=setup(d,&i);d.wrongCID=YES;[d activate:t on:i];assert(!d.writes);
+    assert(t.diverted.count==2);[d restoreAll];assert(FLAGS(@0x53)==0x10 && FLAGS(@0x56)==0x14);
+    d=[Fake new];t=setup(d,&i);d.lostAck=YES;[d activate:t on:i];assert(!t.diverted.count && d.writes==2);
+    d.lostAck=NO;[d verifyAll];assert(t.diverted.count==2);            // retried on the next check
+    d=[Fake new];t=setup(d,&i);d.shortReply=YES;[d activate:t on:i];assert(!t.diverted.count); // bad ACK -> not ours
+    d=[Fake new];t=setup(d,&i);d.wrongCID=YES;[d activate:t on:i];assert(!t.diverted.count);
     d=[Fake new];t=setup(d,&i);d.asleep=YES;[d activate:t on:i];assert(!t.feature);
-    d.asleep=NO;[d verifyAll];assert(t.confirmed.count==2);
+    d.asleep=NO;[d verifyAll];assert(t.diverted.count==2);
     [d snapshot:3 target:t];[d releaseHeld:t mask:3];assert(!t.held && d.edges.count==4);
     d.shutdown=YES;writes=d.writes;[d verifyAll];[d activate:t on:i];assert(d.writes==writes);
     // Receiver sender: sibling mouse interface of the same USB device (values from a real C548 + C53F setup).
@@ -110,5 +108,5 @@ int main(void) { @autoreleasepool {
     writes=d.writes;[LogitechButtonDiverter restoreNativeBehavior];assert(d.writes==writes);
     // Shutdown before deferred startup must not start new hardware work.
     [LogitechButtonDiverter startWithEnabled:YES];assert(shared==d);
-    puts("PASS lifecycle: ownership, remap preservation, lost ACK rollback, both-control verification, long hold/timeouts, retry, foreign diversion, crash-leftover takeover, receiver sender mapping, cleanup, pressure/sender/timestamp");
+    puts("PASS lifecycle: divert/re-divert, long holds across checks, lost-ACK retry, sleep retry, crash-leftover takeover, receiver sender mapping, cleanup, pressure/sender/timestamp");
 } }

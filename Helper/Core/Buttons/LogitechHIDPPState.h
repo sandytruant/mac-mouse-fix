@@ -41,10 +41,4 @@ static inline MFHIDPPEdges MFHIDPPTransition(uint8_t *held, uint8_t snapshot, ui
     *held = next;
     return e;
 }
-// 0 = original; 1 = our temporary diversion; 2 = foreign change.
-static inline int MFHIDPPOwnership(const uint8_t before[3], const uint8_t now[3]) {
-    if (!memcmp(before, now, 3)) return 0;
-    uint8_t expected[3]; memcpy(expected, before, 3); expected[0] |= 1;
-    return !memcmp(expected, now, 3) ? 1 : 2;
-}
 #endif

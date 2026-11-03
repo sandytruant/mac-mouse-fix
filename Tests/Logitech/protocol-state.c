@@ -32,15 +32,11 @@ int main(void) {
     assert(!MFHIDPPReceiverLinkDown(link,7));
     link[4]=0x42;link[5]=0x2A;assert(MFHIDPPReceiverLinkDown(link,7));
     assert(!MFHIDPPReceiverLinkDown(link,6));
-    uint8_t before[3]={0x10,0x12,0x34}, now[3]={0x11,0x12,0x34};
-    assert(MFHIDPPOwnership(before,before)==0);
-    assert(MFHIDPPOwnership(before,now)==1);
-    now[2]++;assert(MFHIDPPOwnership(before,now)==2);
     for (int a=0;a<4;a++) for(int b=0;b<4;b++) for(int c=0;c<4;c++) {
         uint8_t held=a; MFHIDPPEdges e=MFHIDPPTransition(&held,b,c);
         assert(held==(b&c) && e.up==(a&~(b&c)) && e.down==((b&c)&~a));
     }
     uint8_t held=3;
     for(int k=0;k<10000;k++) { MFHIDPPEdges e=MFHIDPPTransition(&held,3,3);assert(!e.up&&!e.down); }
-    puts("PASS protocol: framing, slot/CID/reply matching, side-only snapshots, receiver link flag, ownership and 64 transitions");
+    puts("PASS protocol: framing, slot/CID/reply matching, side-only snapshots, receiver link flag and 64 transitions");
 }
