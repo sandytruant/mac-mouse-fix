@@ -7,3 +7,5 @@ xcrun clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined Tests/Lo
 "$work/protocol"
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Wno-unused-parameter -I Tests/Logitech/stubs -fsanitize=address,undefined Tests/Logitech/lifecycle.m -framework Foundation -framework AppKit -framework IOKit -framework CoreGraphics -o "$work/lifecycle"
 "$work/lifecycle"
+xcrun swiftc Tests/Logitech/click-cycle-stubs.swift Helper/Core/Buttons/ClickCycle.swift Tests/Logitech/click-cycle-main.swift -o "$work/click-cycle"
+"$work/click-cycle"

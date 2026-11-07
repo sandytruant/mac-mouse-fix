@@ -10,10 +10,12 @@
 #import <IOKit/hid/IOHIDLib.h>
 #include <assert.h>
 #include <time.h>
+#import <os/log.h>
 
 @interface MFLogiTarget : NSObject
 @property uint8_t index, feature, wireless, held;
 @property uint64_t senderID;
+@property uint64_t diagnosticInterfaceID;
 @property NSMutableSet<NSNumber *> *diverted;
 @end
 @implementation MFLogiTarget
@@ -23,6 +25,7 @@
 @public uint8_t buffer[64]; uint8_t reply[20];
 }
 @property IOHIDDeviceRef device;
+@property uint64_t registryID;
 @property BOOL open, receiver, waiting, answered, removed;
 @property uint8_t pendingIndex, pendingFeature, command, software;
 @property uint16_t pid;
@@ -158,6 +161,17 @@ static uint64_t receiverSenderID(IOHIDDeviceRef device) {
     IOObjectRelease(it);
     return MFLogiMouseSibling(candidates, vendor);
 }
+static uint64_t MFLogiRegistryID(IOHIDDeviceRef device) {
+    uint64_t rid = 0;
+    io_service_t service = IOHIDDeviceGetService(device);
+    if (service) IORegistryEntryGetRegistryEntryID(service, &rid);
+    return rid;
+}
+// IOHIDManager may supply distinct wrappers for the same registry entry.
+// Never merge unrelated devices just because their registry IDs are unavailable.
+static BOOL MFLogiSameInterface(IOHIDDeviceRef a, uint64_t aID, IOHIDDeviceRef b, uint64_t bID) {
+    return a == b || (aID != 0 && aID == bID);
+}
 static void matched(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
     if (result) return;
     LogitechButtonDiverter *s = (__bridge id)context;
@@ -166,7 +180,8 @@ static void matched(void *context, IOReturn result, void *sender, IOHIDDeviceRef
 static void removed(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
     LogitechButtonDiverter *s = (__bridge id)context;
     // Mark immediately so an in-flight activation cannot write to a disconnected device.
-    for (MFLogiInterface *i in s.interfaces) if (i.device == device) {
+    uint64_t rid = MFLogiRegistryID(device);
+    for (MFLogiInterface *i in s.interfaces) if (!i.removed && MFLogiSameInterface(i.device, i.registryID, device, rid)) {
         i.removed = YES;
         [s enqueue:^{
             for (MFLogiTarget *t in i.targets) [s releaseHeld:t mask:3];
@@ -209,14 +224,21 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
             [shared reverifySoon];
         } else {
             uint8_t mask;
-            if (MFHIDPPButtonSnapshot(r, n, t.index, t.feature, &mask)) [shared snapshot:mask target:t];
+            if (MFHIDPPButtonSnapshot(r, n, t.index, t.feature, &mask)) {
+                os_log(OS_LOG_DEFAULT, "MMFDiag HID interface=%{public}llu slot=%{public}u feature=%{public}u mask=%{public}u held=%{public}u", (unsigned long long)t.diagnosticInterfaceID, (unsigned)t.index, (unsigned)t.feature, (unsigned)mask, (unsigned)t.held);
+                [shared snapshot:mask target:t];
+            }
         }
     }
 }
 - (void)addDevice:(IOHIDDeviceRef)device {
     if (_shutdown) return;
-    for (MFLogiInterface *i in _interfaces) if (i.device == device) return;
-    MFLogiInterface *i = [MFLogiInterface new]; i.device = (IOHIDDeviceRef)CFRetain(device);
+    uint64_t rid = MFLogiRegistryID(device);
+    for (MFLogiInterface *i in _interfaces) if (MFLogiSameInterface(i.device, i.registryID, device, rid)) {
+        os_log(OS_LOG_DEFAULT, "MMFDiag DEDUP interface=%{public}llu sameWrapper=%{public}d", (unsigned long long)rid, i.device == device);
+        return;
+    }
+    MFLogiInterface *i = [MFLogiInterface new]; i.device = (IOHIDDeviceRef)CFRetain(device); i.registryID = rid;
     uint16_t pid = [(__bridge NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey)) unsignedShortValue];
     i.pid = pid;
     i.receiver = pid == 0xC52B || pid == 0xC532 || pid == 0xC534 || pid == 0xC548 || pid == 0xC547;
@@ -231,6 +253,7 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     uint64_t receiverSender = i.receiver ? receiverSenderID(device) : 0;
     for (int slot = 1; slot <= (i.receiver ? 6 : 1); slot++) {
         MFLogiTarget *t = [MFLogiTarget new]; t.index = i.receiver ? slot : 0xFF; t.senderID = receiverSender;
+        t.diagnosticInterfaceID = i.registryID;
         // A receiver PID alone is NOT proof of the sender (see MFLogiMouseSibling for receivers).
         // Direct combined mouse collections alone have a known registry identity.
         NSArray *pairs = (__bridge NSArray *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDDeviceUsagePairsKey));
@@ -351,6 +374,9 @@ static void input(void *context, IOReturn result, void *sender, IOHIDReportType 
     CGEventSetIntegerValueField(e, kCGMouseEventPressure, down ? 1 : 0);
     CGEventSetIntegerValueField(e, kCGMouseEventClickState, 1);
     CGEventSetIntegerValueField(e, (CGEventField)kMFCGEventFieldSenderID, (int64_t)t.senderID);
+    // Diagnostic-only marker: ASCII "MMFLOGI1". Receiver logs this without filtering it.
+    CGEventSetIntegerValueField(e, kCGEventSourceUserData, INT64_C(0x4D4D464C4F474931));
+    os_log(OS_LOG_DEFAULT, "MMFDiag POST interface=%{public}llu slot=%{public}u cid=%{public}u down=%{public}d sender=%{public}llu timestamp=%{public}llu", (unsigned long long)t.diagnosticInterfaceID, (unsigned)t.index, (unsigned)cid, down, (unsigned long long)t.senderID, (unsigned long long)CGEventGetTimestamp(e));
     CGEventPost(kCGHIDEventTap, e); CFRelease(e);
 }
 - (void)snapshot:(uint8_t)mask target:(MFLogiTarget *)t {

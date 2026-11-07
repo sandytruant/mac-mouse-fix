@@ -105,6 +105,13 @@ class ClickCycle: NSObject {
     
     func handleClick(device: Device, button: ButtonNumber, downNotUp mouseDown: Bool, maxClickLevel: Int, triggerCallback: @escaping ClickCycleTriggerCallback) {
         
+        // A repeated down for an already pressed button is not another click.
+        // In particular, do not append modifiers or replace a live hold timer.
+        if mouseDown, let state = state,
+           state.device == device, state.button == button, state.pressState != .up {
+            return
+        }
+
         ///
         /// Call unconditionalReleaseCallbacks
         ///
@@ -139,6 +146,7 @@ class ClickCycle: NSObject {
             /// Update cycle
             ///     [May 22 2025] intCycle is buggy! This code probably relies on the bug. TODO: Fix.
             state!.clickLevel = Math.intCycle(x: state!.clickLevel + 1, lower: 1, upper: maxClickLevel)
+            state!.pressState = .down
         }
         
         /// Guard: NOT release outside of clickCycle it belongs to
@@ -149,6 +157,7 @@ class ClickCycle: NSObject {
             
             /// Check: release after being held for an extended time
             let releaseFromHold = !mouseDown && state?.pressState == .held
+            if !mouseDown { state?.pressState = .up }
             
             ///
             /// triggerCallback
@@ -217,6 +226,7 @@ class ClickCycle: NSObject {
 
             if mouseDown {
                 /// mouseDown
+                state?.downTimer.invalidate()
                 state?.upTimer.invalidate()
                 assertRunLoop(IOThread.runLoop())
                 state?.downTimer = Timer.mf_scheduledTimer(withTimeInterval: 0.25, mode: .common, block: { timer in

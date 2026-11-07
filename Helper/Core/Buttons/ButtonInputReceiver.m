@@ -8,6 +8,7 @@
 //
 
 #import "ButtonInputReceiver.h"
+#import <os/log.h>
 #import "DeviceManager.h"
 #import <IOKit/hid/IOHIDManager.h>
 #import "ButtonTriggerGenerator.h"
@@ -71,6 +72,16 @@ static void eventTapCallback(MFEventType eventType, CGEventRef *eventPtr) {
     /// Get info from cgEvent
     MFMouseButtonNumber buttonNumber = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber) + 1;
     BOOL mouseDown = CGEventGetIntegerValueField(event, kCGMouseEventPressure) != 0;
+    if (buttonNumber == 4 || buttonNumber == 5) {
+        // Log numeric fields only. No pointer location or private event description.
+        os_log(OS_LOG_DEFAULT, "MMFDiag RECEIVE type=%{public}u button=%{public}u pressure=%{public}lld down=%{public}d sender=%{public}llu marker=%{public}llx pid=%{public}lld timestamp=%{public}llu",
+               (unsigned)CGEventGetType(event), (unsigned)buttonNumber,
+               (long long)CGEventGetIntegerValueField(event, kCGMouseEventPressure), mouseDown,
+               (unsigned long long)CGEventGetIntegerValueField(event, (CGEventField)kMFCGEventFieldSenderID),
+               (unsigned long long)CGEventGetIntegerValueField(event, kCGEventSourceUserData),
+               (long long)CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID),
+               (unsigned long long)CGEventGetTimestamp(event));
+    }
     
     /// Debug
     DDLogDebug("Input Receiver - Received event: %@", [NSEvent eventWithCGEvent:event].description);

@@ -53,10 +53,20 @@ static void change(Fake *d, NSNumber *cid, uint8_t flags) {
     uint8_t state[]={flags,0x12,0x34}; d.states[cid]=[NSData dataWithBytes:state length:3];
 }
 int main(void) { @autoreleasepool {
+    // Distinct IOHID wrappers for one registry interface must share ownership.
+    // These stand-ins are compared only, never passed to IOKit.
+    int wrapperA, wrapperB;
+    IOHIDDeviceRef a = (IOHIDDeviceRef)&wrapperA, b = (IOHIDDeviceRef)&wrapperB;
+    assert(MFLogiSameInterface(a, 123, b, 123));
+    assert(MFLogiSameInterface(a, 0, a, 0));
+    assert(!MFLogiSameInterface(a, 123, b, 456));
+    assert(!MFLogiSameInterface(a, 0, b, 0));
+    assert(!MFLogiSameInterface(a, 123, b, 0));
     MFLogiInterface *i; Fake *d=[Fake new];MFLogiTarget *t=setup(d,&i);
     #define FLAGS(cid) (((const uint8_t *)d.states[cid].bytes)[0])
     [d activate:t on:i];assert(t.diverted.count==2 && d.writes==2 && !d.states[@0xC3]);
     [d snapshot:3 target:t];assert(t.held==3 && d.edges.count==2);
+    [d snapshot:3 target:t];assert(t.held==3 && d.edges.count==2); // repeated report, no duplicate downs
     for(int k=0;k<3;k++) [d verifyAll];assert(t.held==3 && d.edges.count==2 && d.writes==2);
     d.asleep=YES;[d verifyAll];assert(t.held==3 && d.edges.count==2); // asleep is not a release
     d.asleep=NO;change(d,@0x56,0x10);[d verifyAll];                    // mouse forgot one diversion
@@ -93,9 +103,11 @@ int main(void) { @autoreleasepool {
     assert(CGEventGetIntegerValueField(captured,kCGMouseEventPressure)==1);
     assert(CGEventGetIntegerValueField(captured,(CGEventField)87)==1234);
     assert(CGEventGetTimestamp(captured)>0);
+    assert(CGEventGetIntegerValueField(captured,kCGEventSourceUserData)==INT64_C(0x4D4D464C4F474931));
     [real post:0x56 down:NO target:t];
     assert(CGEventGetIntegerValueField(captured,kCGMouseEventButtonNumber)==4);
     assert(CGEventGetIntegerValueField(captured,kCGMouseEventPressure)==0);
+    assert(CGEventGetIntegerValueField(captured,kCGEventSourceUserData)==INT64_C(0x4D4D464C4F474931));
     CFRelease(captured);
     // Exercise actual worker queue + bounded normal-context shutdown, without a HID manager.
     d=[Fake new];t=setup(d,&i);[d activate:t on:i];[d snapshot:3 target:t];
